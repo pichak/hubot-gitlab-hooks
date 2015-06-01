@@ -11,6 +11,8 @@
 #   GITLAB_BRANCHES
 #   GITLAB_SHOW_COMMITS_LISTG
 #   GITLAB_SHOW_MERGE_DESCRIPTION
+#   GITLAB_BOTNAME
+#   GITLAB_ICON
 #
 #   Put http://<HUBOT_URL>:<PORT>/gitlab/system as your system hook
 #   Put http://<HUBOT_URL>:<PORT>/gitlab/web as your web hook (per repository)
@@ -136,10 +138,10 @@ module.exports = (robot) ->
 
         # not code? must be a something good!
         else
+          repo = hook.object_attributes.url.replace(/.*\/([^\/]+)\/(merge_requests|issues).*$/,"$1")
+          repo_url = hook.object_attributes.url.replace(/\/(merge_requests|issues).*$/,"")
           switch hook.object_kind
             when "issue"
-              repo = hook.object_attributes.url.replace(/.*\/([^\/]+)\/issues.*$/,"$1")
-              repo_url = hook.object_attributes.url.replace(/\/issues.*$/,"")
               switch hook.object_attributes.action
                 when "update"
                   if hook.object_attributes.state == 'closed'
@@ -169,10 +171,26 @@ module.exports = (robot) ->
                     text: "[<#{repo_url}|#{repo}>] Issue created by #{hook.user.username}"
                   }
             when "merge_request"
-              if showMergeDesc == "1"  
-                robot.send user, "Merge Request #{hook.object_attributes.iid}: #{hook.object_attributes.title} (#{hook.object_attributes.state}) between #{hook.object_attributes.source_branch} and #{hook.object_attributes.target_branch} \n>> #{hook.object_attributes.description}"
-              else
-                robot.send user, "Merge Request #{hook.object_attributes.iid}: #{hook.object_attributes.title} (#{hook.object_attributes.state}) between #{hook.object_attributes.source_branch} and #{hook.object_attributes.target_branch}"
+              if hook.object_attributes.state == "opened"
+                merge_request_title = "\##{hook.object_attributes.iid} #{hook.object_attributes.title}"
+
+                robot.emit 'slack-attachment', {
+                  channel: user.room,
+                  attachments: [{color:"#6CC644", title: merge_request_title, title_url: "#{hook.object_attributes.url}"}],
+                  username: botname,
+                  icon_url: boticon,
+                  text: "[<#{repo_url}|#{repo}>] Pull request submitted by #{hook.user.username}"
+                }
+              else if hook.object_attributes.state == "merged"
+                merge_request_title = "\##{hook.object_attributes.iid} #{hook.object_attributes.title}"
+
+                robot.emit 'slack-attachment', {
+                  channel: user.room,
+                  attachments: [{color:"#E3E4E6", title: "[<#{repo_url}|#{repo}>] Pull request closed: <#{hook.object_attributes.url}|#{merge_request_title}> by #{hook.user.username}"}],
+                  username: botname,
+                  icon_url: boticon,
+                  text: ""
+                }
 
   robot.router.post "/gitlab/system", (req, res) ->
     handler "system", req, res
