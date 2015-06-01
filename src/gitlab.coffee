@@ -1,5 +1,5 @@
 # Description:
-#   Post gitlab related events using gitlab hooks
+#   Post gitlab related events using gitlab hooks to slack
 #
 # Dependencies:
 #   "url" : ""
@@ -29,12 +29,11 @@
 #   /gitlab/web
 #
 # Author:
-#   omribahumi, spruce
+#   omribahumi, spruce, milani
+#
 
 url = require 'url'
 querystring = require 'querystring'
-
-
 
 module.exports = (robot) ->
   gitlabChannel = process.env.GITLAB_CHANNEL or "#gitlab"
@@ -42,19 +41,13 @@ module.exports = (robot) ->
   showMergeDesc = process.env.GITLAB_SHOW_MERGE_DESCRIPTION or "1"
   debug = process.env.GITLAB_DEBUG?
   branches = ['all']
+  botname = process.env.GITLAB_BOTNAME or "Gitlab"
+  boticon = process.env.GITLAB_ICON or "https://about.gitlab.com/ico/favicon.ico"
   if process.env.GITLAB_BRANCHES?
     branches = process.env.GITLAB_BRANCHES.split ','
 
-  if robot.adapter.constructor.name is 'IrcBot'
-    bold = (text) ->
-      "\x02" + text + "\x02"
-    underline = (text) ->
-      "\x1f" + text + "\x1f"
-  else
-    bold = (text) ->
-      text
-    underline = (text) ->
-      text
+  trim_commit_id = (id) ->
+    id.replace(/([0-9a-f]{9})[0-9a-f]+$/, '$1')
 
   trim_commit_url = (url) ->
     url.replace(/(\/[0-9a-f]{9})[0-9a-f]+$/, '$1')
@@ -63,9 +56,9 @@ module.exports = (robot) ->
     query = querystring.parse(url.parse(req.url).query)
     hook = req.body
 
-    if debug
-      console.log('query', query)
-      console.log('hook', hook)
+    #if debug
+    console.log('query', query)
+    console.log('hook', hook)
 
     user = {}
     user.room = if query.targets then query.targets else gitlabChannel
@@ -94,49 +87,92 @@ module.exports = (robot) ->
         if hook.ref
           # should look for a tag push where the ref starts with refs/tags
           if /^refs\/tags/.test hook.ref
-            tag = hook.ref.split("/")[2..].join("/")
-            #this is actually a tag being pushed
-            if /^0+$/.test hook.before
-              message = "#{bold(hook.user_name)} pushed a new tag (#{bold(tag)}) to #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
-            else if /^0+$/.test hook.after
-              message = "#{bold(hook.user_name)} removed a tag (#{bold(tag)}) from #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
-            else
-              message = "#{bold(hook.user_name)} pushed #{bold(hook.total_commits_count)} commits to tag (#{bold(tag)}) in #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
+            # tag = hook.ref.split("/")[2..].join("/")
+            # # this is actually a tag being pushed
+            # if /^0+$/.test hook.before
+            #   message = "#{bold(hook.user_name)} pushed a new tag (#{bold(tag)}) to #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
+            # else if /^0+$/.test hook.after
+            #   message = "#{bold(hook.user_name)} removed a tag (#{bold(tag)}) from #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
+            # else
+            #   message = "#{bold(hook.user_name)} pushed #{bold(hook.total_commits_count)} commits to tag (#{bold(tag)}) in #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
           else
             branch = hook.ref.split("/")[2..].join("/")
             # if the ref before the commit is 00000, this is a new branch
             if branch in branches or 'all' in branches
               if /^0+$/.test(hook.before)
-                message = "#{bold(hook.user_name)} pushed a new branch (#{bold(branch)}) to #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
+
+                message = ''
+                for commit in hook.commits
+                  message += "<#{commit.url}|#{trim_commit_id(commit.id)}>: #{commit.message}\n"
+
+                robot.emit 'slack-attachment', {
+                  channel: user.room,
+                  attachments: [{color:"#4183C4",text:message}],
+                  username: botname,
+                  icon_url: boticon,
+                  text: "[#{hook.repository.name}] New branch \"<#{hook.repository.homepage}|#{branch}>\" pushed by #{hook.user_name}"
+                }
               else if /^0+$/.test(hook.after)
-                message = "#{bold(hook.user_name)} deleted a branch (#{bold(branch)}) from #{bold(hook.repository.name)} (#{underline(hook.repository.homepage)})"
+                robot.emit 'slack-attachment', {
+                  channel: user.room,
+                  attachments: [{color:"#4183C4",text: "[#{hook.repository.name}] The branch \"#{branch}\" deleted by #{hook.user_name}"}],
+                  username: botname,
+                  icon_url: boticon,
+                  text: ""
+                }
               else
-                message = "#{bold(hook.user_name)} pushed #{bold(hook.total_commits_count)} commits to #{bold(branch)} in #{bold(hook.repository.name)} (#{underline(hook.repository.homepage + '/compare/' + hook.before.substr(0,9) + '...' + hook.after.substr(0,9))})"
-                if showCommitsList == "1"
-                  merger = []
-                  for i in [0...hook.commits.length]
-                    merger[i] = ">> Commit " + (i+1) + ": " + hook.commits[i].message
-                  message += "\r\n" + merger.join "\r\n"
-          robot.send user, message
+
+                message = ''
+                for commit in hook.commits
+                  message += "<#{commit.url}|#{trim_commit_id(commit.id)}>: #{commit.message}\n"
+
+                robot.emit 'slack-attachment', {
+                  channel: user.room,
+                  attachments: [{color:"#4183C4",text:message}],
+                  username: botname,
+                  icon_url: boticon,
+                  text: "[#{hook.repository.name}:#{branch}] #{hook.total_commits_count} new commits by #{hook.user_name}:"
+                }
+
         # not code? must be a something good!
         else
           switch hook.object_kind
             when "issue"
-              unless hook.object_attributes.action == "update"
-              # for now we don't trigger on update because on manual close it triggers close and update
-                text = "Issue #{bold(hook.object_attributes.iid)}: #{hook.object_attributes.title} (#{hook.object_attributes.action}) at #{hook.object_attributes.url}"
-                if hook.object_attributes.description
-                  # split describtion on \r\n so that It can add >> to every line
-                  splitted = hook.object_attributes.description.split  "\r\n"
-                  for i in [0...splitted.length]
-                    splitted[i] = ">> " + splitted[i]
-                  text += "\r\n" + splitted.join "\r\n"
-                robot.send user, text
+              repo = hook.object_attributes.url.replace(/.*\/([^\/]+)\/issues.*$/,"$1")
+              repo_url = hook.object_attributes.url.replace(/\/issues.*$/,"")
+              switch hook.object_attributes.action
+                when "update"
+                  if hook.object_attributes.state == 'closed'
+                    robot.emit 'slack-attachment', {
+                      channel: user.room,
+                      attachments: [{color:"#E3E4E6",text:"[<#{repo_url}|#{repo}>] Issue closed: <#{hook.object_attributes.url}|\##{hook.object_attributes.id} #{hook.object_attributes.title}> by #{hook.user.username}"}],
+                      username: botname,
+                      icon_url: boticon,
+                      text: ""
+                    }
+                  else if hook.object_attributes.state == 'reopened'
+                    robot.emit 'slack-attachment', {
+                      channel: user.room,
+                      attachments: [{color:"#FAD5A1",text:"[<#{repo_url}|#{repo}>] Issue reopened: <#{hook.object_attributes.url}|\##{hook.object_attributes.id} #{hook.object_attributes.title}> by #{hook.user.username}"}],
+                      username: botname,
+                      icon_url: boticon,
+                      text: ""
+                    }
+                when "open"
+                  message = "\##{hook.object_attributes.id} #{hook.object_attributes.title}"
+
+                  robot.emit 'slack-attachment', {
+                    channel: user.room,
+                    attachments: [{color:"#F29513",title:message,title_url:"#{hook.object_attributes.url}"}],
+                    username: botname,
+                    icon_url: boticon,
+                    text: "[<#{repo_url}|#{repo}>] Issue created by #{hook.user.username}"
+                  }
             when "merge_request"
               if showMergeDesc == "1"  
-                robot.send user, "Merge Request #{bold(hook.object_attributes.iid)}: #{hook.object_attributes.title} (#{hook.object_attributes.state}) between #{bold(hook.object_attributes.source_branch)} and #{bold(hook.object_attributes.target_branch)} \n>> #{hook.object_attributes.description}"
+                robot.send user, "Merge Request #{hook.object_attributes.iid}: #{hook.object_attributes.title} (#{hook.object_attributes.state}) between #{hook.object_attributes.source_branch} and #{hook.object_attributes.target_branch} \n>> #{hook.object_attributes.description}"
               else
-                robot.send user, "Merge Request #{bold(hook.object_attributes.iid)}: #{hook.object_attributes.title} (#{hook.object_attributes.state}) between #{bold(hook.object_attributes.source_branch)} and #{bold(hook.object_attributes.target_branch)}"
+                robot.send user, "Merge Request #{hook.object_attributes.iid}: #{hook.object_attributes.title} (#{hook.object_attributes.state}) between #{hook.object_attributes.source_branch} and #{hook.object_attributes.target_branch}"
 
   robot.router.post "/gitlab/system", (req, res) ->
     handler "system", req, res
@@ -145,4 +181,3 @@ module.exports = (robot) ->
   robot.router.post "/gitlab/web", (req, res) ->
     handler "web", req, res
     res.end "OK"
-
