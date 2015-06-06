@@ -165,7 +165,7 @@ module.exports = (robot) ->
 
                   robot.emit 'slack-attachment', {
                     channel: user.room,
-                    attachments: [{color:"#F29513",title:message,title_url:"#{hook.object_attributes.url}"}],
+                    attachments: [{color:"#F29513", title:message, title_link:"#{hook.object_attributes.url}"}],
                     username: botname,
                     icon_url: boticon,
                     text: "[<#{repo_url}|#{repo}>] Issue created by #{hook.user.username}"
@@ -176,7 +176,7 @@ module.exports = (robot) ->
 
                 robot.emit 'slack-attachment', {
                   channel: user.room,
-                  attachments: [{color:"#6CC644", title: merge_request_title, title_url: "#{hook.object_attributes.url}"}],
+                  attachments: [{color:"#6CC644", title: merge_request_title, title_link: "#{hook.object_attributes.url}"}],
                   username: botname,
                   icon_url: boticon,
                   text: "[<#{repo_url}|#{repo}>] Pull request submitted by #{hook.user.username}"
