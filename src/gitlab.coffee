@@ -172,7 +172,7 @@ module.exports = (robot) ->
                   }
             when "merge_request"
               if hook.object_attributes.state == "opened"
-                merge_request_title = "\##{hook.object_attributes.iid} #{hook.object_attributes.title}"
+                merge_request_title = "<#{hook.object_attributes.url}|\##{hook.object_attributes.iid} #{hook.object_attributes.title}>"
 
                 robot.emit 'slack-attachment', {
                   channel: user.room,
